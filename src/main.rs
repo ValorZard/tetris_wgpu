@@ -1,4 +1,8 @@
+mod tetris;
+mod texture;
+
 use cgmath::prelude::*;
+use tetris::*;
 use wgpu::util::DeviceExt;
 use winit::{
     event::*,
@@ -6,8 +10,6 @@ use winit::{
     window::Window,
     window::WindowBuilder,
 };
-
-mod texture;
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vertex {
@@ -153,7 +155,6 @@ struct CameraUniform {
 
 impl CameraUniform {
     fn new() -> Self {
-        use cgmath::SquareMatrix;
         Self {
             view_proj: cgmath::Matrix4::identity().into(),
         }
@@ -225,16 +226,9 @@ impl Instance {
     }
 }
 
-const NUM_INSTANCES_PER_ROW: u32 = 10;
-const NUM_INSTANCES_PER_COL: u32 = 10;
-const NUM_INSTANCES: u32 = NUM_INSTANCES_PER_ROW * NUM_INSTANCES_PER_COL;
-
 // center the grid on the center of the screen.
-const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(
-    NUM_INSTANCES_PER_COL as f32 * 0.5,
-    NUM_INSTANCES_PER_ROW as f32 * 0.5,
-    0.0,
-);
+const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> =
+    cgmath::Vector3::new(BOARD_WIDTH as f32 * 0.5, BOARD_HEIGHT as f32 * 0.5, 0.0);
 
 fn generate_block_instance(x: f32, y: f32, z: f32) -> Instance {
     let position = cgmath::Vector3 { x: x, y: y, z: z } - INSTANCE_DISPLACEMENT;
@@ -250,7 +244,7 @@ fn generate_block_instance(x: f32, y: f32, z: f32) -> Instance {
     Instance { position, rotation }
 }
 
-struct State {
+struct RenderState {
     surface: wgpu::Surface,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -269,9 +263,10 @@ struct State {
     num_indices: u32,
     instances: Vec<Instance>,
     instance_buffer: wgpu::Buffer,
+    board: Board,
 }
 
-impl State {
+impl RenderState {
     // creating some of the wgpu types requires async code
     // async means that this function will execute in its own time unrelated to other functions
     // or something. I still dont fully get async yet.
@@ -375,7 +370,7 @@ impl State {
         let camera = Camera {
             // position the camera one unit up and 2 units back
             // +z is out of the screen
-            eye: (0.0, 6.0, 18.0).into(),
+            eye: (0.0, 6.0, 24.0).into(),
             // have it look at the origin
             target: (0.0, 0.0, 0.0).into(),
             // which way is "up"
@@ -427,9 +422,9 @@ impl State {
         });
 
         /*
-        let mut instances = (0..NUM_INSTANCES_PER_ROW)
+        let mut instances = (0..BOARD_HEIGHT)
             .flat_map(|z| {
-                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
+                (0..BOARD_HEIGHT).map(move |x| {
                     let position = cgmath::Vector3 {
                         x: x as f32,
                         y: 0.0,
@@ -523,6 +518,8 @@ impl State {
         let num_vertices = VERTICES.len() as u32;
         let num_indices = INDICES.len() as u32;
 
+        let mut board = Board::new();
+        board.spawn_random_board();
         Self {
             surface,
             device,
@@ -542,6 +539,7 @@ impl State {
             num_indices,
             instances,
             instance_buffer,
+            board,
         }
     }
 
@@ -603,9 +601,10 @@ impl State {
             // instance buffer stuff
             self.instances = Vec::<Instance>::new();
 
-            for x in 0..10 {
-                for y in 0..10 {
-                    if (x % 3 == 0 && y % 2 == 0) {
+            for x in 0..BOARD_WIDTH {
+                for y in 0..BOARD_HEIGHT {
+                    //if (x % 3 == 0 && y % 2 == 0) {
+                    if self.board.grid[x][y] == 1 {
                         let block_instance = generate_block_instance(x as f32, y as f32, 0.);
                         self.instances.push(block_instance);
                     }
@@ -617,6 +616,7 @@ impl State {
                 .iter()
                 .map(Instance::to_raw)
                 .collect::<Vec<_>>();
+
             self.instance_buffer =
                 self.device
                     .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -648,8 +648,8 @@ fn main() {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
-    // State::new uses async code, so lets wait for it to finish before going into event loop
-    let mut state = pollster::block_on(State::new(&window));
+    // RenderState::new uses async code, so lets wait for it to finish before going into event loop
+    let mut render_state = pollster::block_on(RenderState::new(&window));
 
     // handles closing the window once esc is pressed or the close button is pressed
     event_loop.run(move |event, _, control_flow| match event {
@@ -657,7 +657,7 @@ fn main() {
             ref event,
             window_id,
         } if window_id == window.id() => {
-            if !state.input(event) {
+            if !render_state.input(event) {
                 match event {
                     WindowEvent::CloseRequested
                     | WindowEvent::KeyboardInput {
@@ -670,22 +670,22 @@ fn main() {
                         ..
                     } => *control_flow = ControlFlow::Exit,
                     WindowEvent::Resized(physical_size) => {
-                        state.resize(*physical_size);
+                        render_state.resize(*physical_size);
                     }
                     WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
                         // new inner size is &&mut so dereference it
-                        state.resize(**new_inner_size);
+                        render_state.resize(**new_inner_size);
                     }
                     _ => {}
                 }
             }
         }
         Event::RedrawRequested(_) => {
-            state.update();
-            match state.render() {
+            render_state.update();
+            match render_state.render() {
                 Ok(_) => {}
                 // Reconfigure the surface if lost
-                Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
+                Err(wgpu::SurfaceError::Lost) => render_state.resize(render_state.size),
                 // The system is out of memory so we should probably quit
                 Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
                 // All other errors (Outdated, Timeout) should be resolved by the next frame
