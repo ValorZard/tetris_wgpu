@@ -1,8 +1,8 @@
-mod tetris;
+mod game;
 mod texture;
 
 use cgmath::prelude::*;
-use tetris::*;
+use game::*;
 use wgpu::util::DeviceExt;
 use winit::{
     event::*,
@@ -10,6 +10,7 @@ use winit::{
     window::Window,
     window::WindowBuilder,
 };
+use std::time::{Duration, Instant};
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vertex {
@@ -264,6 +265,7 @@ struct RenderState {
     instances: Vec<Instance>,
     instance_buffer: wgpu::Buffer,
     board: Board,
+    time_since_last_whatever: Instant,
 }
 
 impl RenderState {
@@ -520,6 +522,8 @@ impl RenderState {
 
         let mut board = Board::new();
         board.spawn_random_board();
+
+        let now = Instant::now();
         Self {
             surface,
             device,
@@ -540,6 +544,7 @@ impl RenderState {
             instances,
             instance_buffer,
             board,
+            time_since_last_whatever: now,
         }
     }
 
@@ -560,6 +565,12 @@ impl RenderState {
         // when you add new instances to the Vec, that you recreate the instance_buffer
         // and as well as camera_bind_group,
         // otherwise your new instances won't show up correctly.
+        let now = Instant::now();
+        if now.duration_since(self.time_since_last_whatever) > Duration::new(1, 0)
+        {
+            self.board.spawn_random_board();
+            self.time_since_last_whatever = now;
+        }
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
