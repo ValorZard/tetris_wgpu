@@ -104,14 +104,10 @@ const VERTICES: &[Vertex] = &[
     Vertex {
         position: [-0.5, -0.5, 0.0],
         tex_coords: [0.0, 0.0],
-    }, 
+    },
 ];
 
-const INDICES: &[u16] = &[
-    0, 1, 2, 
-    1, 3, 2, 
-    0, 0, 0, 
-    /* padding */ 0];
+const INDICES: &[u16] = &[0, 1, 2, 1, 3, 2, 0, 0, 0, /* padding */ 0];
 
 #[rustfmt::skip]
 pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
@@ -230,12 +226,29 @@ impl Instance {
 }
 
 const NUM_INSTANCES_PER_ROW: u32 = 10;
-const NUM_INSTANCES: u32 = NUM_INSTANCES_PER_ROW * NUM_INSTANCES_PER_ROW;
+const NUM_INSTANCES_PER_COL: u32 = 10;
+const NUM_INSTANCES: u32 = NUM_INSTANCES_PER_ROW * NUM_INSTANCES_PER_COL;
+
+// center the grid on the center of the screen.
 const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(
+    NUM_INSTANCES_PER_COL as f32 * 0.5,
     NUM_INSTANCES_PER_ROW as f32 * 0.5,
     0.0,
-    NUM_INSTANCES_PER_ROW as f32 * 0.5,
 );
+
+fn generate_block_instance(x: f32, y: f32, z: f32) -> Instance {
+    let position = cgmath::Vector3 { x: x, y: y, z: z } - INSTANCE_DISPLACEMENT;
+
+    let rotation = if position.is_zero() {
+        // this is needed so an object at (0, 0, 0) won't get scaled to zero
+        // as Quaternions can effect scale if they're not created correctly
+        cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
+    } else {
+        cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(0.0))
+    };
+
+    Instance { position, rotation }
+}
 
 struct State {
     surface: wgpu::Surface,
@@ -413,7 +426,8 @@ impl State {
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
         });
 
-        let instances = (0..NUM_INSTANCES_PER_ROW)
+        /*
+        let mut instances = (0..NUM_INSTANCES_PER_ROW)
             .flat_map(|z| {
                 (0..NUM_INSTANCES_PER_ROW).map(move |x| {
                     let position = cgmath::Vector3 {
@@ -437,9 +451,10 @@ impl State {
                 })
             })
             .collect::<Vec<_>>();
-
-        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
-        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            */
+        let mut instances = Vec::<Instance>::new();
+        let mut instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+        let mut instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Instance Buffer"),
             contents: bytemuck::cast_slice(&instance_data),
             usage: wgpu::BufferUsages::VERTEX,
@@ -544,8 +559,8 @@ impl State {
     }
 
     fn update(&mut self) {
-        // when you add new instances to the Vec, that you recreate the instance_buffer 
-        // and as well as camera_bind_group, 
+        // when you add new instances to the Vec, that you recreate the instance_buffer
+        // and as well as camera_bind_group,
         // otherwise your new instances won't show up correctly.
     }
 
@@ -585,12 +600,38 @@ impl State {
             render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
             render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            // NEW!
+            // instance buffer stuff
+            self.instances = Vec::<Instance>::new();
+
+            for x in 0..10 {
+                for y in 0..10 {
+                    if (x % 3 == 0 && y % 2 == 0) {
+                        let block_instance = generate_block_instance(x as f32, y as f32, 0.);
+                        self.instances.push(block_instance);
+                    }
+                }
+            }
+
+            let instance_data = self
+                .instances
+                .iter()
+                .map(Instance::to_raw)
+                .collect::<Vec<_>>();
+            self.instance_buffer =
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("Instance Buffer"),
+                        contents: bytemuck::cast_slice(&instance_data),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            // end of instance buffer.
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
 
             // UPDATED!
             render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as _);
+
+            //println!("does this print every frame?");
         }
 
         // submit will accept anything that implements IntoIter
