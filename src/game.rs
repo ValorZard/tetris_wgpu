@@ -1,9 +1,6 @@
-use ::rand::prelude::*;
-
-pub const BOARD_WIDTH: usize = 10;
-pub const BOARD_HEIGHT: usize = 20;
 pub const HIDDEN_BOARDS_ROWS: u32 = 2;
 
+/* 
 pub struct Board {
     pub grid: Vec<Vec<i8>>,
 }
@@ -25,7 +22,7 @@ impl Board {
             }
         }
     }
-
+*/
     // function to compute the next generation
     // reference taken from https://dev.to/dineshgdk/game-of-life-in-rust-4mfc
     /* 
@@ -202,5 +199,5 @@ impl Board {
             }
         }
     }
-    */
-}
+    
+}*/

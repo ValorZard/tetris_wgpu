@@ -2,6 +2,7 @@ mod game;
 mod texture;
 
 use cgmath::prelude::*;
+use rand::prelude::*;
 use game::*;
 use wgpu::util::DeviceExt;
 use winit::{
@@ -166,6 +167,64 @@ impl CameraUniform {
     }
 }
 
+
+// function to compute the next generation
+fn gol(grid: &Vec<Vec<i8>>) -> Vec<Vec<i8>> {
+
+    // get the number of rows
+    let n = grid.len();
+
+    // get the number of columns
+    let m = grid[0].len();
+
+    // create an empty grid to compute the future generation
+    let mut future: Vec<Vec<i8>> = vec![vec![0; n]; m];
+
+    // iterate through each and every cell
+    for i in 0..n {
+        for j in 0..m {
+
+            // the current state of the cell (alive / dead)
+            let cell_state = grid[i][j];
+
+            // variable to track the number of alive neighbors
+            let mut live_neighbors = 0;
+
+            // iterate through every neighbors including the current cell
+            for x in -1i8..=1 {
+                for y in -1i8..=1 {
+
+                    // position of one of the neighbors (new_x, new_y)
+                    let new_x = (i as i8) + x;
+                    let new_y = (j as i8) + y;
+
+                    // make sure the position is within the bounds of the grid
+                    if new_x > 0 && new_y > 0 && new_x < n as i8 && new_y < m as i8 {
+                        live_neighbors += grid[new_x as usize][new_y as usize];
+                    }
+                }
+            }
+
+            // substract the state of the current cell to get the number of alive neighbors
+            live_neighbors -= cell_state;
+
+            // applying the rules of game of life to get the future generation
+            if cell_state == 1 && live_neighbors < 2 {
+                future[i][j] = 0;
+            } else if cell_state == 1 && live_neighbors > 3 {
+                future[i][j] = 0;
+            } else if cell_state == 0 && live_neighbors == 3 {
+                future[i][j] = 1;
+            } else {
+                future[i][j] = cell_state;
+            }
+        }
+    }
+
+    // return the future generation
+    future
+}
+
 struct Instance {
     position: cgmath::Vector3<f32>,
     rotation: cgmath::Quaternion<f32>,
@@ -228,11 +287,10 @@ impl Instance {
 }
 
 // center the grid on the center of the screen.
-const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> =
-    cgmath::Vector3::new(BOARD_WIDTH as f32 * 0.5, BOARD_HEIGHT as f32 * 0.5, 0.0);
-
-fn generate_block_instance(x: f32, y: f32, z: f32) -> Instance {
-    let position = cgmath::Vector3 { x: x, y: y, z: z } - INSTANCE_DISPLACEMENT;
+fn generate_block_instance(x: f32, y: f32, z: f32, rows: usize, cols: usize) -> Instance {
+    let instance_displacement: cgmath::Vector3<f32> =
+    cgmath::Vector3::new(cols as f32 * 0.5, rows as f32 * 0.5, 0.0);
+    let position = cgmath::Vector3 { x: x, y: y, z: z } - instance_displacement;
 
     let rotation = if position.is_zero() {
         // this is needed so an object at (0, 0, 0) won't get scaled to zero
@@ -264,7 +322,9 @@ struct RenderState {
     num_indices: u32,
     instances: Vec<Instance>,
     instance_buffer: wgpu::Buffer,
-    board: Board,
+    board: Vec<Vec<i8>>,
+    rows: usize,
+    cols: usize,
     time_since_last_whatever: Instant,
 }
 
@@ -520,8 +580,24 @@ impl RenderState {
         let num_vertices = VERTICES.len() as u32;
         let num_indices = INDICES.len() as u32;
 
-        let mut board = Board::new();
-        board.spawn_random_board();
+        // set the number of rows and columns of the board grid
+        let (rows, cols) = (20, 20);
+
+        // create the grid
+        let mut board: Vec<Vec<i8>> = vec![vec![0; cols]; rows];
+
+        // set the initial state of the board grid random
+        let mut rng = rand::thread_rng();
+        for x in 0..board.len(){
+            for y in 0..board[0].len() {
+                if rng.gen_bool(0.5) {
+                    board[x][y] = 1;
+                }
+                else {
+                    board[x][y] = 0;
+                }
+            }
+        }
 
         let now = Instant::now();
         Self {
@@ -545,6 +621,8 @@ impl RenderState {
             instance_buffer,
             board,
             time_since_last_whatever: now,
+            rows,
+            cols,
         }
     }
 
@@ -566,9 +644,9 @@ impl RenderState {
         // and as well as camera_bind_group,
         // otherwise your new instances won't show up correctly.
         let now = Instant::now();
-        if now.duration_since(self.time_since_last_whatever) > Duration::new(1, 0)
+        if now.duration_since(self.time_since_last_whatever) > Duration::from_millis(300)
         {
-            self.board.spawn_random_board();
+            self.board = gol(&self.board);
             self.time_since_last_whatever = now;
         }
     }
@@ -612,15 +690,17 @@ impl RenderState {
             // instance buffer stuff
             self.instances = Vec::<Instance>::new();
 
-            for x in 0..BOARD_WIDTH {
-                for y in 0..BOARD_HEIGHT {
+            
+            for x in 0..self.board.len(){
+                for y in 0..self.board[0].len() {
                     //if (x % 3 == 0 && y % 2 == 0) {
-                    if self.board.grid[x][y] == 1 {
-                        let block_instance = generate_block_instance(x as f32, y as f32, 0.);
+                    if self.board[x][y] == 1 {
+                        let block_instance = generate_block_instance(x as f32, y as f32, 0., self.rows, self.cols);
                         self.instances.push(block_instance);
                     }
                 }
             }
+            
 
             let instance_data = self
                 .instances
