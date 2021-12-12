@@ -432,7 +432,7 @@ impl RenderState {
         let camera = Camera {
             // position the camera one unit up and 2 units back
             // +z is out of the screen
-            eye: (0.0, 6.0, 24.0).into(),
+            eye: (0.0, 6.0, 28.0).into(),
             // have it look at the origin
             target: (0.0, 0.0, 0.0).into(),
             // which way is "up"
@@ -581,7 +581,7 @@ impl RenderState {
         let num_indices = INDICES.len() as u32;
 
         // set the number of rows and columns of the board grid
-        let (rows, cols) = (20, 20);
+        let (rows, cols) = (30, 30);
 
         // create the grid
         let mut board: Vec<Vec<i8>> = vec![vec![0; cols]; rows];
